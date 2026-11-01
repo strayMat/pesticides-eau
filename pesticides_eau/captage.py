@@ -27,14 +27,15 @@ logger = logging.getLogger(__name__)
 # Colonnes SISE-Eaux utilisées (mêmes noms que dans les fichiers DIS_PLV / DIS_RESULT).
 COL_PRELEVEMENT = "referenceprel"
 COL_INSTALLATION = "cdreseau"
-COL_COMMUNE = "inseecommuneprinc"
+# `inseecommune` dans les fichiers eaurob (CAP/TTP/UDI_PLV), `inseecommuneprinc` dans DIS_PLV.
+COL_COMMUNE_CANDIDATES = ("inseecommune", "inseecommuneprinc")
 COL_DATE = "dateprel"
 COL_PARAMETRE = "cdparametresiseeaux"
 COL_VALEUR = "valtraduite"
 
 
 def find_cap_files(dirs: Iterable[Path], kind: str) -> list[Path]:
-    """Fichiers texte des captages (`CAP`) de type `PLV` ou `RESULT` dans les dossiers extraits."""
+    """Fichiers texte des captages (`CAP`) de type `PLV` ou `RES` (CAP_RES_* / CAP_RESULT_*) dans les dossiers extraits."""
     files = []
     for d in dirs:
         for f in sorted(Path(d).rglob("*")):
@@ -77,14 +78,18 @@ def build_pesticides_captage_commune(
     """Construit l'expression ibis de la table commune du captage x année."""
     data_dirs = list(data_dirs)
     plv_raw = _read(con, find_cap_files(data_dirs, "PLV"))
-    res_raw = _read(con, find_cap_files(data_dirs, "RESULT"))
+    res_raw = _read(con, find_cap_files(data_dirs, "RES"))
+    col_commune = next((c for c in COL_COMMUNE_CANDIDATES if c in plv_raw.columns), None)
+    if col_commune is None:
+        msg = f"Aucune colonne commune parmi {COL_COMMUNE_CANDIDATES} : {plv_raw.columns}"
+        raise KeyError(msg)
 
     plv = (
         plv_raw
         .select(
             referenceprel=_[COL_PRELEVEMENT],
             code_captage=_[COL_INSTALLATION],
-            inseecommune=_[COL_COMMUNE].strip().lpad(5, "0"),
+            inseecommune=_[col_commune].strip().lpad(5, "0"),
             annee=_[COL_DATE].re_extract(r"(\d{4})", 1).try_cast("int32"),
         )
         .filter(_.annee.between(start_year, end_year), _.inseecommune.notnull())

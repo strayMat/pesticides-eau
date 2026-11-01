@@ -26,7 +26,7 @@ Sortie : `data/pesticides_captage_commune.parquet`.
 
 Jeu data.gouv [Résultats du contrôle sanitaire de l'eau du robinet](https://www.data.gouv.fr/datasets/resultats-du-controle-sanitaire-de-leau-du-robinet) (SISE-Eaux, ministère de la Santé / ARS), archives `eaurob-AAAA.zip` (annuelles) ou `eaurob-AAAAMM.zip` (mensuelles). Seuls les fichiers des installations de type **CAP** (captages) sont lus, en `PLV` (prélèvements) et en `RESULT` (résultats).
 
-- Commune = `inseecommuneprinc` du prélèvement, c'est-à-dire la commune du point de surveillance du captage.
+- Commune = `inseecommune` du prélèvement, c'est-à-dire la commune du point de surveillance du captage.
 - Pesticides = substances actives et métabolites du référentiel `pesticides_eau/references/parametres_pesticides.csv`, extrait du seed `references_generations_futures.csv` de [Data For Good 13_pollution_eau](https://github.com/dataforgoodfr/13_pollution_eau) (MIT). Les lignes totaux (`PESTOT`) sont exclues des sommes.
 - Plage d'années : 2010-2025. SISE-Eaux n'est publié qu'à partir de 2016.
 
@@ -48,4 +48,4 @@ Jeu data.gouv [Résultats du contrôle sanitaire de l'eau du robinet](https://ww
 
 ### À vérifier sur les vraies données
 
-Le code a été écrit sans accès aux fichiers réels : les noms de fichiers CAP (`*CAP*PLV*`, `*CAP*RESULT*`) et les colonnes (`cdreseau`, `inseecommuneprinc`, `dateprel`, `referenceprel`, `cdparametresiseeaux`, `valtraduite`) reprennent la structure des fichiers `DIS_*`. Ils sont centralisés en tête de `pesticides_eau/captage.py`.
+Le code a été écrit sans accès aux fichiers réels : les noms de fichiers CAP (`*CAP*PLV*`, `*CAP*RES*`) et les colonnes (`cdreseau`, `inseecommune`, `dateprel`, `referenceprel`, `cdparametresiseeaux`, `valtraduite`) reprennent la structure des fichiers `DIS_*`. Ils sont centralisés en tête de `pesticides_eau/captage.py`.

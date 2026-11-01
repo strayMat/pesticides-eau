@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-PLV_COLS = ["cddept", "cdreseau", "nomreseau", "inseecommuneprinc", "nomcommuneprinc", "referenceprel", "dateprel"]
+PLV_COLS = ["cddept", "cdreseau", "nomreseau", "inseecommune", "nomcommuneprinc", "referenceprel", "dateprel"]
 RES_COLS = ["cddept", "referenceprel", "cdparametresiseeaux", "libminparametre", "rqana", "valtraduite", "referenceanl"]
 
 MONTHS = {
@@ -15,7 +15,7 @@ MONTHS = {
             ["001", "001000002", "Forage B", "01001", "Ambérieux", "00100000002", "2025-01-20"],
             ["001", "001000001", "Source A", "01001", "Ambérieux", "00100000004", "2024-12-31"],
         ],
-        "CAP_RESULT": [
+        "CAP_RES": [
             ["001", "00100000001", "ATRZ", "Atrazine", "0,05", "0,05", "A1"],
             ["001", "00100000001", "GPST", "Glyphosate", "0.3", "0.3", "A1"],
             ["001", "00100000001", "GPST", "Glyphosate", "0.2", "0.2", "A2"],
@@ -27,11 +27,11 @@ MONTHS = {
         ],
         # Doit être ignoré : prélèvement sur une unité de distribution
         "UDI_PLV": [["099", "099000001", "UDI X", "99999", "X", "09900000009", "2025-01-10"]],
-        "UDI_RESULT": [["099", "09900000009", "ATRZ", "Atrazine", "5", "5", "A9"]],
+        "UDI_RES": [["099", "09900000009", "ATRZ", "Atrazine", "5", "5", "A9"]],
     },
     "202502": {
         "CAP_PLV": [["02A", "02A000003", "Puits C", "2A004", "Ajaccio", "02A00000003", "03/02/2025"]],
-        "CAP_RESULT": [["02A", "02A00000003", "ESAMTC", "ESA métolachlore", "<0.05", "0", "A5"]],
+        "CAP_RES": [["02A", "02A00000003", "ESAMTC", "ESA métolachlore", "<0.05", "0", "A5"]],
     },
 }
 
