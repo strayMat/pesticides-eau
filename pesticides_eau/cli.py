@@ -47,8 +47,8 @@ def pesticides_captage(
     start_year: int, end_year: int, months: tuple[str, ...], raw_dir: Path, offline: bool, output: Path
 ) -> None:
     """Pesticides mesurés aux captages (eaux brutes), par commune du captage et par année."""
-    from pesticides_eau.captage import build_pesticides_captage_commune
-    from pesticides_eau.download import download_period, list_resources
+    from pesticides_eau.captage import build_pesticides_captage_commune, find_par_file
+    from pesticides_eau.download import REF_PERIOD, download_period, list_resources
 
     if months:
         periods = list(months)
@@ -70,12 +70,14 @@ def pesticides_captage(
     else:
         resources = list_resources()
         data_dirs = [download_period(p, raw_dir, resources) for p in periods]
+        download_period(REF_PERIOD, raw_dir, resources)
     if not data_dirs:
         msg = f"Aucune donnée pour les périodes {periods} dans {raw_dir}"
         raise click.ClickException(msg)
 
     con = ibis.duckdb.connect()
-    table = build_pesticides_captage_commune(con, data_dirs, start_year, end_year)
+    par_path = find_par_file(raw_dir / f"eaurob-{REF_PERIOD}")
+    table = build_pesticides_captage_commune(con, data_dirs, par_path, start_year, end_year)
     output.parent.mkdir(parents=True, exist_ok=True)
     table.to_parquet(output)
     n = con.read_parquet(output).count().execute()

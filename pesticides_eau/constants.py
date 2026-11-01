@@ -6,7 +6,6 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 DIR2ROOT = Path(__file__).parent.parent.absolute()
 DIR2DATA = DIR2ROOT / "data"
 DIR2RAW = DIR2DATA / "raw"
-DIR2REFERENCES = Path(__file__).parent / "references"
 
 # Jeu data.gouv « Résultats du contrôle sanitaire de l'eau du robinet » (SISE-Eaux).
 # Contient, par type d'installation (CAP = captage, TTP = traitement/production, UDI = distribution),
@@ -19,9 +18,6 @@ MIN_YEAR = 2010
 MAX_YEAR = 2025
 FIRST_PUBLISHED_YEAR = 2016
 
-# Référentiel des paramètres pesticides (extrait du seed `references_generations_futures.csv`
-# du projet Data For Good 13_pollution_eau, licence MIT).
-PATH2PESTICIDES_REF = DIR2REFERENCES / "parametres_pesticides.csv"
 # Paramètre SISE « Total des pesticides analysés » calculé par le laboratoire.
 PESTOT_CODE = "PESTOT"
 

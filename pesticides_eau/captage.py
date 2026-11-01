@@ -1,8 +1,9 @@
 """Table des pesticides mesurés aux captages (eaux brutes), agrégée par commune du captage et par année.
 
-Source : SISE-Eaux, fichiers CAP (installations de type captage) du jeu data.gouv
-« Résultats du contrôle sanitaire de l'eau du robinet ». La commune retenue est celle du point de
-surveillance du prélèvement (`inseecommuneprinc`), c'est-à-dire la localisation du captage.
+Source : SISE-Eaux, fichiers CAP_PLV / CAP_RES du jeu data.gouv « Résultats du contrôle sanitaire de
+l'eau du robinet ». La commune retenue est `inseecommune` du prélèvement, c'est-à-dire la commune du
+point de surveillance du captage. Les pesticides sont identifiés via le référentiel officiel PAR_*.csv
+(archive eaurob-ref), par famille de paramètres.
 """
 
 import logging
@@ -14,7 +15,6 @@ import ibis.expr.types as ir
 from ibis import _
 
 from pesticides_eau.constants import (
-    PATH2PESTICIDES_REF,
     PESTOT_CODE,
     SEUIL_BRUTE_SUBSTANCE,
     SEUIL_BRUTE_TOTAL,
@@ -24,54 +24,70 @@ from pesticides_eau.constants import (
 
 logger = logging.getLogger(__name__)
 
-# Colonnes SISE-Eaux utilisées (mêmes noms que dans les fichiers DIS_PLV / DIS_RESULT).
-COL_PRELEVEMENT = "referenceprel"
-COL_INSTALLATION = "cdreseau"
-# `inseecommune` dans les fichiers eaurob (CAP/TTP/UDI_PLV), `inseecommuneprinc` dans DIS_PLV.
-COL_COMMUNE_CANDIDATES = ("inseecommune", "inseecommuneprinc")
-COL_DATE = "dateprel"
-COL_PARAMETRE = "cdparametresiseeaux"
-COL_VALEUR = "valtraduite"
+# Familles PAR (`cdfamilleparam`) des métabolites ; les substances actives sont les familles « PESTICIDES ... ».
+FAMILLES_METABOLITES = {
+    "LP": "metabolite_pertinent",
+    "LN": "metabolite_non_pertinent",
+    "LC": "metabolite_non_caracterise",
+}
 
 
 def find_cap_files(dirs: Iterable[Path], kind: str) -> list[Path]:
-    """Fichiers texte des captages (`CAP`) de type `PLV` ou `RES` (CAP_RES_* / CAP_RESULT_*) dans les dossiers extraits."""
-    files = []
-    for d in dirs:
-        for f in sorted(Path(d).rglob("*")):
-            name = f.name.upper()
-            if f.is_file() and f.suffix.lower() in {".txt", ".csv"} and "CAP" in name and kind in name:
-                files.append(f)
+    """Fichiers CAP_PLV_* ou CAP_RES_* dans les dossiers extraits."""
+    dirs = list(dirs)
+    files = [f for d in dirs for f in sorted(Path(d).rglob(f"CAP_{kind}_*.txt"))]
     if not files:
-        msg = f"Aucun fichier CAP {kind} trouvé dans {list(dirs)}"
+        msg = f"Aucun fichier CAP_{kind}_*.txt trouvé dans {dirs}"
         raise FileNotFoundError(msg)
     return files
 
 
+def find_par_file(ref_dir: Path) -> Path:
+    """Référentiel des paramètres le plus récent (PAR_AAAAMMJJ.csv)."""
+    files = sorted(Path(ref_dir).rglob("PAR_*.csv"))
+    if not files:
+        msg = f"Aucun référentiel PAR_*.csv dans {ref_dir}"
+        raise FileNotFoundError(msg)
+    return files[-1]
+
+
 def _read(con: ibis.BaseBackend, files: list[Path]) -> ir.Table:
-    return con.read_csv(
-        [str(f) for f in files],
-        all_varchar=True,
-        union_by_name=True,
-        header=True,
+    return con.read_csv([str(f) for f in files], all_varchar=True, union_by_name=True, header=True)
+
+
+def read_pesticides_ref(con: ibis.BaseBackend, par_path: Path) -> ir.Table:
+    """Substances actives et métabolites de pesticides du référentiel PAR (hors total PESTOT)."""
+    par = _read(con, [par_path])
+    fam = par.cdfamilleparam
+    categorie = fam.substitute(FAMILLES_METABOLITES, else_="substance_active")
+    return par.filter(
+        par.libfamilleparam.startswith("PESTICIDES") | fam.isin(list(FAMILLES_METABOLITES)),
+        par.cdparametresiseeaux != PESTOT_CODE,
+    ).select(
+        "cdparametresiseeaux",
+        "libminparametre",
+        "casparam",
+        "cdfamilleparam",
+        "libfamilleparam",
+        categorie=categorie,
     )
 
 
-def read_pesticides_ref(con: ibis.BaseBackend, path: Path = PATH2PESTICIDES_REF) -> ir.Table:
-    """Référentiel des substances actives et métabolites (hors totaux)."""
-    ref = con.read_csv(str(path), all_varchar=True, header=True)
-    return ref.filter(_.categorie_2.notnull() & (_.categorie_2 != "")).select(
-        COL_PARAMETRE, "libminparametre", "categorie_2", "categorie_3"
-    )
-
-
-def _to_float(col: ir.StringValue) -> ir.FloatingValue:
-    return col.replace(",", ".").try_cast("float64")
+def _valeur_ug_l(res: ir.Table) -> ir.FloatingValue:
+    """Valeur numérique en µg/L ; 0 si inférieure à la limite de quantification (rssigne '<')."""
+    if "rsana" in res.columns:
+        brute = res.rsana.replace(",", ".").try_cast("float64")
+        brute = ibis.ifelse(res.rssigne.strip() == "<", 0.0, brute)
+    else:  # format « commune par commune » (DIS_RESULT)
+        brute = res.valtraduite.replace(",", ".").try_cast("float64")
+    unite = res.cdunitereferencesiseeaux.strip()
+    return ibis.ifelse(unite == "ng/L", brute / 1000, brute)
 
 
 def build_pesticides_captage_commune(
     con: ibis.BaseBackend,
     data_dirs: Iterable[Path],
+    par_path: Path,
     start_year: int,
     end_year: int,
 ) -> ir.Table:
@@ -79,47 +95,43 @@ def build_pesticides_captage_commune(
     data_dirs = list(data_dirs)
     plv_raw = _read(con, find_cap_files(data_dirs, "PLV"))
     res_raw = _read(con, find_cap_files(data_dirs, "RES"))
-    col_commune = next((c for c in COL_COMMUNE_CANDIDATES if c in plv_raw.columns), None)
-    if col_commune is None:
-        msg = f"Aucune colonne commune parmi {COL_COMMUNE_CANDIDATES} : {plv_raw.columns}"
-        raise KeyError(msg)
 
     plv = (
         plv_raw
         .select(
-            referenceprel=_[COL_PRELEVEMENT],
-            code_captage=_[COL_INSTALLATION],
-            inseecommune=_[col_commune].strip().lpad(5, "0"),
-            annee=_[COL_DATE].re_extract(r"(\d{4})", 1).try_cast("int32"),
+            "referenceprel",
+            code_captage=_.cdreseau,
+            inseecommune=_.inseecommune.strip().lpad(5, "0"),
+            nature_eau=_.inae.strip(),
+            codebss=_.codebss.strip().nullif(""),
+            annee=_.dateprel.re_extract(r"(\d{4})", 1).try_cast("int32"),
         )
         .filter(_.annee.between(start_year, end_year), _.inseecommune.notnull())
+        # les fichiers mensuels peuvent republier un même prélèvement
         .distinct(on="referenceprel", keep="first")
     )
 
-    res = res_raw.select(
-        referenceprel=_[COL_PRELEVEMENT],
-        cdparametresiseeaux=_[COL_PARAMETRE].strip(),
-        valeur=_to_float(_[COL_VALEUR]),
-    )
+    res = res_raw.select("referenceprel", "cdparametresiseeaux", valeur=_valeur_ug_l(res_raw))
 
+    ref = read_pesticides_ref(con, par_path)
     # Un paramètre peut être analysé plusieurs fois sur un prélèvement (terrain / labos) : on garde le max.
-    ref = read_pesticides_ref(con)
     mesures = (
         res
-        .join(ref, COL_PARAMETRE)
-        .group_by(["referenceprel", COL_PARAMETRE])
+        .join(ref.select("cdparametresiseeaux", "categorie"), "cdparametresiseeaux")
+        .group_by(["referenceprel", "cdparametresiseeaux", "categorie"])
         .aggregate(valeur=_.valeur.max())
         .join(plv, "referenceprel")
     )
 
-    # Niveau prélèvement
     par_prel = mesures.group_by(["referenceprel", "inseecommune", "annee"]).aggregate(
         n_parametres=_.count(),
         n_quantifies=(_.valeur > 0).sum(),
         conc_max=_.valeur.max(),
         total=_.valeur.fill_null(0).sum(),
     )
-    pestot = res.filter(_[COL_PARAMETRE] == PESTOT_CODE).group_by("referenceprel").aggregate(pestot_labo=_.valeur.max())
+    pestot = (
+        res.filter(_.cdparametresiseeaux == PESTOT_CODE).group_by("referenceprel").aggregate(pestot_labo=_.valeur.max())
+    )
     par_prel = par_prel.left_join(pestot, "referenceprel").drop("referenceprel_right")
 
     agg_prel = par_prel.group_by(["inseecommune", "annee"]).aggregate(
@@ -136,11 +148,21 @@ def build_pesticides_captage_commune(
         n_prel_total_sup_5=(_.total > SEUIL_BRUTE_TOTAL).sum(),
     )
 
+    quantifie = _.valeur > 0
     agg_param = mesures.group_by(["inseecommune", "annee"]).aggregate(
         n_captages=_.code_captage.nunique(),
-        n_substances_recherchees=_[COL_PARAMETRE].nunique(),
-        n_substances_quantifiees=_[COL_PARAMETRE].nunique(where=_.valeur > 0),
-        substances_quantifiees=_[COL_PARAMETRE].collect(where=_.valeur > 0, distinct=True, order_by=_[COL_PARAMETRE]),
+        n_captages_eso=_.code_captage.nunique(where=_.nature_eau == "ESO"),
+        n_captages_esu=_.code_captage.nunique(where=_.nature_eau == "ESU"),
+        n_substances_recherchees=_.cdparametresiseeaux.nunique(),
+        n_substances_quantifiees=_.cdparametresiseeaux.nunique(where=quantifie),
+        n_substances_actives_quantifiees=_.cdparametresiseeaux.nunique(
+            where=quantifie & (_.categorie == "substance_active")
+        ),
+        n_metabolites_quantifies=_.cdparametresiseeaux.nunique(where=quantifie & (_.categorie != "substance_active")),
+        substances_quantifiees=_.cdparametresiseeaux.collect(
+            where=quantifie, distinct=True, order_by=_.cdparametresiseeaux
+        ),
+        codes_bss=_.codebss.collect(where=_.codebss.notnull(), distinct=True, order_by=_.codebss),
     )
 
     out = agg_param.join(agg_prel, ["inseecommune", "annee"])
@@ -148,10 +170,14 @@ def build_pesticides_captage_commune(
         "inseecommune",
         "annee",
         "n_captages",
+        "n_captages_eso",
+        "n_captages_esu",
         "n_prelevements",
         "n_analyses",
         "n_substances_recherchees",
         "n_substances_quantifiees",
+        "n_substances_actives_quantifiees",
+        "n_metabolites_quantifies",
         "n_prelevements_quantifies",
         "conc_max_substance",
         "total_pesticides_max",
@@ -162,4 +188,5 @@ def build_pesticides_captage_commune(
         "n_prel_total_sup_0_5",
         "n_prel_total_sup_5",
         "substances_quantifiees",
+        "codes_bss",
     ).order_by(["inseecommune", "annee"])

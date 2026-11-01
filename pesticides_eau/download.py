@@ -13,6 +13,9 @@ logger = logging.getLogger(__name__)
 
 # eaurob-2024.zip (annuel) ou eaurob-202601.zip (mensuel)
 RESOURCE_PATTERN = re.compile(r"eaurob-(\d{4}|\d{6})\.zip$")
+# Référentiels (PAR = paramètres) : eaurob-ref-AAAAMMJJ.zip
+REF_PATTERN = re.compile(r"eaurob-ref-(\d{8})\.zip$")
+REF_PERIOD = "ref"
 
 
 def _get_json(url: str) -> dict:
@@ -24,19 +27,23 @@ def _get_json(url: str) -> dict:
 
 
 def list_resources() -> dict[str, str]:
-    """Retourne {période: url} pour les archives eaurob-AAAA.zip / eaurob-AAAAMM.zip du jeu de données."""
+    """Retourne {période: url} pour les archives eaurob-AAAA.zip / eaurob-AAAAMM.zip, et {"ref": url} du référentiel."""
     meta = _get_json(f"{DATAGOUV_API}/{DATAGOUV_DATASET_SLUG}/")
     resources = {}
+    refs = {}
     for res in meta["resources"]:
         name = res.get("title") or res["url"].rsplit("/", 1)[-1]
-        match = RESOURCE_PATTERN.search(name)
-        if match:
+        if match := RESOURCE_PATTERN.search(name):
             resources[match.group(1)] = res["url"]
+        elif match := REF_PATTERN.search(name):
+            refs[match.group(1)] = res["url"]
+    if refs:  # référentiel le plus récent
+        resources[REF_PERIOD] = refs[max(refs)]
     return resources
 
 
 def download_period(period: str, raw_dir: Path = DIR2RAW, resources: dict[str, str] | None = None) -> Path:
-    """Télécharge et décompresse l'archive d'une période (« 2024 » ou « 202601 »).
+    """Télécharge et décompresse l'archive d'une période (« 2024 », « 202601 » ou « ref »).
 
     Retourne le dossier d'extraction. Ne retélécharge pas si le dossier existe déjà.
     """

@@ -5,15 +5,16 @@ import pandas as pd
 import pytest
 from click.testing import CliRunner
 
-from pesticides_eau.captage import build_pesticides_captage_commune
+from pesticides_eau.captage import build_pesticides_captage_commune, find_par_file
 from pesticides_eau.cli import cli
-from pesticides_eau.download import RESOURCE_PATTERN
+from pesticides_eau.download import REF_PATTERN, RESOURCE_PATTERN
 
 
 def _build(raw_dir: Path, start: int = 2010, end: int = 2025) -> pd.DataFrame:
     con = ibis.duckdb.connect()
     dirs = [raw_dir / "eaurob-202501", raw_dir / "eaurob-202502"]
-    return build_pesticides_captage_commune(con, dirs, start, end).to_pandas().set_index(["inseecommune", "annee"])
+    par = find_par_file(raw_dir / "eaurob-ref")
+    return build_pesticides_captage_commune(con, dirs, par, start, end).to_pandas().set_index(["inseecommune", "annee"])
 
 
 def test_commune_captage(raw_dir: Path) -> None:
@@ -23,10 +24,13 @@ def test_commune_captage(raw_dir: Path) -> None:
 
     row = df.loc[("01001", 2025)]
     assert row.n_captages == 2
-    assert row.n_prelevements == 2
+    assert (row.n_captages_eso, row.n_captages_esu) == (1, 1)
+    assert row.n_prelevements == 2  # doublon republié en février dédoublonné
     assert row.n_analyses == 4  # PESTOT et nitrates exclus, doublon GPST dédoublonné
     assert row.n_substances_recherchees == 3
     assert row.n_substances_quantifiees == 3
+    assert row.n_substances_actives_quantifiees == 2
+    assert row.n_metabolites_quantifies == 1  # AMPA, 2500 ng/L -> 2,5 µg/L
     assert row.conc_max_substance == pytest.approx(2.5)
     assert row.total_pesticides_max == pytest.approx(2.5)
     assert row.total_pesticides_moyen == pytest.approx((0.35 + 2.5) / 2)
@@ -36,6 +40,7 @@ def test_commune_captage(raw_dir: Path) -> None:
     assert row.n_prel_total_sup_0_5 == 1
     assert row.n_prel_total_sup_5 == 0
     assert list(row.substances_quantifiees) == ["AMPA", "ATRZ", "GPST"]
+    assert list(row.codes_bss) == ["06754X0071"]
 
     corse = df.loc[("2A004", 2025)]
     assert corse.n_substances_quantifiees == 0
@@ -74,3 +79,4 @@ def test_resource_pattern() -> None:
     assert RESOURCE_PATTERN.search("eaurob-2024.zip").group(1) == "2024"
     assert RESOURCE_PATTERN.search("eaurob-202601.zip").group(1) == "202601"
     assert RESOURCE_PATTERN.search("eaurob-ref-20260812.zip") is None
+    assert REF_PATTERN.search("eaurob-ref-20260812.zip").group(1) == "20260812"
